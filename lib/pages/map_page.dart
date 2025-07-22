@@ -98,6 +98,7 @@ class _MapPageState extends State<MapPage> {
       if (data['routes'] != null &&
           data['routes'].isNotEmpty &&
           data['routes'][0]['geometry'] != null) {
+        //Tomamos la primera ruta 
         final String encoded = data['routes'][0]['geometry'];
 
         final points = PolylinePoints().decodePolyline(encoded);
@@ -142,7 +143,7 @@ class _MapPageState extends State<MapPage> {
               MarkerLayer(
                 markers: [
                   Marker(
-                    point: const LatLng(-31.5406, -68.5767),
+                    point: unsj,
                     width: 80,
                     height: 80,
                     child: const Icon(
@@ -164,6 +165,7 @@ class _MapPageState extends State<MapPage> {
                     ),
                 ],
               ),
+              //Trazo de ruta
               PolylineLayer(
                 polylines: [
                   if (_ruta.isNotEmpty)
