@@ -94,6 +94,7 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
         if (remitente == null || !remitente.endsWith(vinculado!)) return;
 
         // Procesamos la ubicación si viene del número vinculado
+        print("MENSAJE RECIBIDO: ${message.body}");
         final partes = message.body?.split(',');
         if (partes != null && partes.length == 2) {
           final lat = double.tryParse(partes[0]);
