@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
@@ -35,7 +36,7 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   @override
   void initState() {
     super.initState();
-    _ubicacionInicialFuture= _obtenerUbicacionActual();
+    _ubicacionInicialFuture = _obtenerUbicacionActual();
     _escucharSmsEntrantes();
   }
 
@@ -116,20 +117,17 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     await telephony.sendSms(to: _numeroVinculado!, message: mensaje);
   }
 
-  void _toggleAutoEnvio() {
+  Future<void> _toggleAutoEnvio() async {
     setState(() {
       _autoEnvioActivado = !_autoEnvioActivado;
     });
 
     if (_autoEnvioActivado) {
-      _autoEnvioTimer = Timer.periodic(const Duration(seconds: 30), (
-        timer,
-      ) async {
-        await _obtenerUbicacionActual();
-        await _enviarSms();
-      });
+      final service = FlutterBackgroundService();
+      await service.startService();
+      service.invoke("setNumber", {"numero": _numeroVinculado});
     } else {
-      _autoEnvioTimer?.cancel();
+      FlutterBackgroundService().invoke("stopService");
     }
   }
 
@@ -155,6 +153,10 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
                 setState(() {
                   _numeroVinculado = numeroTemporal;
                 });
+                FlutterBackgroundService().invoke("setNumber", {
+                  "numero": _numeroVinculado,
+                });
+
                 Navigator.pop(context);
               },
               child: const Text("Vincular"),

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 //import 'package:mapas/pages/map_page.dart';
 import 'package:mapas/pages/mapsms_page.dart';
+import 'package:mapas/services/background_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeService();
   runApp(const MyApp());
 }
 
