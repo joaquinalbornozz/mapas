@@ -43,6 +43,7 @@ dependencies:
   telephony: ^0.2.0
   flutter_background_service: ^5.1.0
   flutter_local_notifications: ^19.4.0
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

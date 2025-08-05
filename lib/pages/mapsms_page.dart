@@ -7,6 +7,7 @@ import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:telephony/telephony.dart';
 import 'package:http/http.dart' as http;
 
@@ -20,6 +21,7 @@ class MapSmsRutaPage extends StatefulWidget {
 class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   final MapController _mapController = MapController();
   final Telephony telephony = Telephony.instance;
+  late final SharedPreferences preferences;
 
   LatLng? _miUbicacion;
   LatLng? _ubicacionRecibida;
@@ -28,7 +30,6 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   String? _numeroVinculado;
   bool _autoEnvioActivado = false;
-  Timer? _autoEnvioTimer;
 
   final String apiKeyORS =
       '5b3ce3597851110001cf6248627feed9a1c04d9f81e7b717bb1d3107';
@@ -46,7 +47,9 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   }
 
   Future<LatLng> _obtenerUbicacionActual() async {
+    preferences = await SharedPreferences.getInstance();
     _solicitarPermisos();
+    _numeroVinculado = preferences.getString("numeroVinculado");
     bool gpsActivo = await Geolocator.isLocationServiceEnabled();
     if (!gpsActivo) {
       return const LatLng(-31.5406, -68.5767);
@@ -149,16 +152,21 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                setState(() {
-                  _numeroVinculado = numeroTemporal;
-                });
-                FlutterBackgroundService().invoke("setNumber", {
-                  "numero": _numeroVinculado,
-                });
+              onPressed:
+                  () => () async {
+                    setState(() {
+                      _numeroVinculado = numeroTemporal;
+                    });
+                    await preferences.setString(
+                      "numeroVinculado",
+                      numeroTemporal,
+                    );
+                    FlutterBackgroundService().invoke("setNumber", {
+                      "numero": _numeroVinculado,
+                    });
 
-                Navigator.pop(context);
-              },
+                    Navigator.pop(context);
+                  },
               child: const Text("Vincular"),
             ),
           ],
@@ -217,7 +225,6 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   @override
   void dispose() {
-    _autoEnvioTimer?.cancel();
     super.dispose();
   }
 
@@ -232,25 +239,29 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
             onPressed: _vincularNumero,
             tooltip: "Vincular contacto",
           ),
-          IconButton(
-            icon: const Icon(Icons.send),
-            onPressed: _enviarSms,
-            tooltip: "Enviar ubicación",
-          ),
-          IconButton(
-            icon: Icon(
-              _autoEnvioActivado ? Icons.pause : Icons.play_arrow,
-              color: _autoEnvioActivado ? Colors.red : Colors.green,
+          if (_numeroVinculado != null) ...[
+            IconButton(
+              icon: const Icon(Icons.send),
+              onPressed: _enviarSms,
+              tooltip: "Enviar ubicación",
             ),
-            onPressed: _toggleAutoEnvio,
-            tooltip:
-                _autoEnvioActivado ? "Detener autoenvío" : "Iniciar autoenvío",
-          ),
-          IconButton(
-            icon: const Icon(Icons.alt_route),
-            onPressed: _calcularRuta,
-            tooltip: "Calcular Ruta",
-          ),
+            IconButton(
+              icon: Icon(
+                _autoEnvioActivado ? Icons.pause : Icons.play_arrow,
+                color: _autoEnvioActivado ? Colors.red : Colors.green,
+              ),
+              onPressed: _toggleAutoEnvio,
+              tooltip:
+                  _autoEnvioActivado
+                      ? "Detener autoenvío"
+                      : "Iniciar autoenvío",
+            ),
+            IconButton(
+              icon: const Icon(Icons.alt_route),
+              onPressed: _calcularRuta,
+              tooltip: "Calcular Ruta",
+            ),
+          ],
         ],
       ),
       body: FutureBuilder<LatLng>(
