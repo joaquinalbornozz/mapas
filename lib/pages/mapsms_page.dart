@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -84,6 +85,13 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     return inicial;
   }
 
+  Future<bool?> _smsremover(int id, int threadId) async {
+    SmsRemover smsRemover = SmsRemover();
+    bool? success = await smsRemover.removeSmsById(id, threadId);
+    print('SMS removed: $success');
+    return success;
+  }
+
   void _escucharSmsEntrantes() {
     SmsReceiver receiver = SmsReceiver();
     receiver.onSmsReceived!.listen((SmsMessage message) async {
@@ -99,27 +107,47 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
       // Procesamos la ubicación si viene del número vinculado
       print("MENSAJE RECIBIDO: ${message.body}");
       final partes = message.body?.split(',');
-      if (partes != null && partes.length == 2) {
-        final lat = double.tryParse(partes[0]);
-        final lng = double.tryParse(partes[1]);
+      if (partes != null) {
+        double? lat;
+        double? lng;
+        if (partes.length == 2) {
+          lat = double.tryParse(partes[0]);
+          lng = double.tryParse(partes[1]);
+        } else if (partes.length == 3) {
+          lat = double.tryParse(partes[0]);
+          lng = double.tryParse(partes[1]);
+          //Si existe una tercera parte del mensaje y es la cadena "_S_U" se envia la ubicación
+          final solictud = partes[2];
+          if (solictud == "_S_U") await _enviarSms();
+        }
         if (lat != null && lng != null) {
           setState(() {
-            _ubicacionRecibida = LatLng(lat, lng);
+            _ubicacionRecibida = LatLng(lat!, lng!);
           });
         }
       }
-      SmsRemover smsRemover = SmsRemover();
-      bool? success = await smsRemover.removeSmsById(
-        message.id!,
-        message.threadId!,
-      );
-      print('SMS removed: $success');
+      _smsremover(message.id!, message.threadId!);
     });
   }
 
   Future<void> _enviarSms() async {
     if (_miUbicacion == null || _numeroVinculado == null) return;
     final mensaje = "${_miUbicacion!.latitude},${_miUbicacion!.longitude}";
+    SmsSender sender = SmsSender();
+    SmsMessage sms = SmsMessage(_numeroVinculado, mensaje);
+    sms.onStateChanged.listen((state) {
+      if (state == SmsMessageState.Sent) {
+        print("SMS sent successfully!");
+      } else if (state == SmsMessageState.Delivered) {
+        print("SMS delivered!");
+      }
+    });
+    sender.sendSms(sms);
+  }
+
+  Future<void> _solicitarUbicacion() async {
+    if (_miUbicacion == null || _numeroVinculado == null) return;
+    final mensaje = "${_miUbicacion!.latitude},${_miUbicacion!.longitude},_S_U";
     SmsSender sender = SmsSender();
     SmsMessage sms = SmsMessage(_numeroVinculado, mensaje);
     sms.onStateChanged.listen((state) {
@@ -245,36 +273,6 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Ubicación por SMS + Ruta"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.link),
-            onPressed: _vincularNumero,
-            tooltip: "Vincular contacto",
-          ),
-          if (_numeroVinculado != null) ...[
-            IconButton(
-              icon: const Icon(Icons.send),
-              onPressed: _enviarSms,
-              tooltip: "Enviar ubicación",
-            ),
-            IconButton(
-              icon: Icon(
-                _autoEnvioActivado ? Icons.pause : Icons.play_arrow,
-                color: _autoEnvioActivado ? Colors.red : Colors.green,
-              ),
-              onPressed: _toggleAutoEnvio,
-              tooltip:
-                  _autoEnvioActivado
-                      ? "Detener autoenvío"
-                      : "Iniciar autoenvío",
-            ),
-            IconButton(
-              icon: const Icon(Icons.alt_route),
-              onPressed: _calcularRuta,
-              tooltip: "Calcular Ruta",
-            ),
-          ],
-        ],
       ),
       body: FutureBuilder<LatLng>(
         future: _ubicacionInicialFuture,
@@ -325,6 +323,47 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
             ],
           );
         },
+      ),
+      floatingActionButton: SpeedDial(
+        icon: Icons.menu,
+        activeIcon: Icons.close,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+        children: [
+          SpeedDialChild(
+            child: const Icon(Icons.link),
+            label: 'Vincular contacto',
+            onTap: _vincularNumero,
+          ),
+          if (_numeroVinculado != null) ...[
+            SpeedDialChild(
+              child: const Icon(Icons.send),
+              label: 'Enviar ubicación',
+              onTap: _enviarSms,
+            ),
+            SpeedDialChild(
+              child: const Icon(Icons.rss_feed),
+              label: 'Solicitar ubicación',
+              onTap: _solicitarUbicacion,
+            ),
+            SpeedDialChild(
+              child: Icon(
+                _autoEnvioActivado ? Icons.pause : Icons.play_arrow,
+                color: _autoEnvioActivado ? Colors.red : Colors.green,
+              ),
+              label:
+                  _autoEnvioActivado
+                      ? 'Detener autoenvío'
+                      : 'Iniciar autoenvío',
+              onTap: _toggleAutoEnvio,
+            ),
+            SpeedDialChild(
+              child: const Icon(Icons.alt_route),
+              label: 'Calcular ruta',
+              onTap: _calcularRuta,
+            ),
+          ],
+        ],
       ),
     );
   }
