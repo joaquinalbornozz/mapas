@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:custom_advanced_sms/custom_advanced_sms.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:telephony/telephony.dart';
 
 // this will be used as notification channel id
 const notificationChannelId = 'location_app';
@@ -49,7 +49,6 @@ Future<void> initializeService() async {
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   String? numeroVinculado;
-  final telephony = Telephony.instance;
   DartPluginRegistrant.ensureInitialized();
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -89,7 +88,16 @@ void onStart(ServiceInstance service) async {
           final mensaje = "${pos.latitude},${pos.longitude}";
           print("Mensaje: ${mensaje}");
 
-          await telephony.sendSms(to: numeroVinculado!, message: mensaje);
+          SmsSender sender = SmsSender();
+          SmsMessage sms = SmsMessage(numeroVinculado, mensaje);
+          sms.onStateChanged.listen((state) {
+            if (state == SmsMessageState.Sent) {
+              print("SMS sent successfully!");
+            } else if (state == SmsMessageState.Delivered) {
+              print("SMS delivered!");
+            }
+          });
+          sender.sendSms(sms);
         } catch (e) {
           print("Error enviando SMS: $e");
         }

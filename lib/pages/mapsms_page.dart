@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -8,7 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:telephony/telephony.dart';
+import 'package:custom_advanced_sms/custom_advanced_sms.dart';
 import 'package:http/http.dart' as http;
 
 class MapSmsRutaPage extends StatefulWidget {
@@ -20,7 +21,6 @@ class MapSmsRutaPage extends StatefulWidget {
 
 class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   final MapController _mapController = MapController();
-  final Telephony telephony = Telephony.instance;
   late final SharedPreferences preferences;
 
   LatLng? _miUbicacion;
@@ -43,7 +43,6 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   Future<void> _solicitarPermisos() async {
     await [Permission.location, Permission.sms, Permission.phone].request();
-    await telephony.requestPhoneAndSmsPermissions;
   }
 
   Future<LatLng> _obtenerUbicacionActual() async {
@@ -86,38 +85,51 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   }
 
   void _escucharSmsEntrantes() {
-    telephony.listenIncomingSms(
-      onNewMessage: (SmsMessage message) {
-        // Verificamos que haya un número vinculado
-        if (_numeroVinculado == null) return;
+    SmsReceiver receiver = SmsReceiver();
+    receiver.onSmsReceived!.listen((SmsMessage message) async {
+      // Verificamos que haya un número vinculado
+      if (_numeroVinculado == null) return;
 
-        // Normalizamos ambos números para comparar (por si uno tiene +54 y otro no)
-        final remitente = message.address?.replaceAll(RegExp(r'\D'), '');
-        final vinculado = _numeroVinculado?.replaceAll(RegExp(r'\D'), '');
+      // Normalizamos ambos números para comparar (por si uno tiene +54 y otro no)
+      final remitente = message.address?.replaceAll(RegExp(r'\D'), '');
+      final vinculado = _numeroVinculado?.replaceAll(RegExp(r'\D'), '');
 
-        if (remitente == null || !remitente.endsWith(vinculado!)) return;
+      if (remitente == null || !remitente.endsWith(vinculado!)) return;
 
-        // Procesamos la ubicación si viene del número vinculado
-        print("MENSAJE RECIBIDO: ${message.body}");
-        final partes = message.body?.split(',');
-        if (partes != null && partes.length == 2) {
-          final lat = double.tryParse(partes[0]);
-          final lng = double.tryParse(partes[1]);
-          if (lat != null && lng != null) {
-            setState(() {
-              _ubicacionRecibida = LatLng(lat, lng);
-            });
-          }
+      // Procesamos la ubicación si viene del número vinculado
+      print("MENSAJE RECIBIDO: ${message.body}");
+      final partes = message.body?.split(',');
+      if (partes != null && partes.length == 2) {
+        final lat = double.tryParse(partes[0]);
+        final lng = double.tryParse(partes[1]);
+        if (lat != null && lng != null) {
+          setState(() {
+            _ubicacionRecibida = LatLng(lat, lng);
+          });
         }
-      },
-      listenInBackground: false,
-    );
+      }
+      SmsRemover smsRemover = SmsRemover();
+      bool? success = await smsRemover.removeSmsById(
+        message.id!,
+        message.threadId!,
+      );
+      print('SMS removed: $success');
+    });
   }
 
   Future<void> _enviarSms() async {
     if (_miUbicacion == null || _numeroVinculado == null) return;
     final mensaje = "${_miUbicacion!.latitude},${_miUbicacion!.longitude}";
-    await telephony.sendSms(to: _numeroVinculado!, message: mensaje);
+    SmsSender sender = SmsSender();
+    SmsMessage sms = SmsMessage(_numeroVinculado, mensaje);
+    sms.onStateChanged.listen((state) {
+      if (state == SmsMessageState.Sent) {
+        print("SMS sent successfully!");
+      } else if (state == SmsMessageState.Delivered) {
+        print("SMS delivered!");
+      }
+    });
+    sender.sendSms(sms);
   }
 
   Future<void> _toggleAutoEnvio() async {
