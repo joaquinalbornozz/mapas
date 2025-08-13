@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print, use_build_context_synchronously, deprecated_member_use
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -10,8 +10,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:custom_advanced_sms/custom_advanced_sms.dart';
+import 'package:mapas/services/background_service.dart' as background_service;
 import 'package:http/http.dart' as http;
+import 'package:telephony/telephony.dart';
 
 class MapSmsRutaPage extends StatefulWidget {
   const MapSmsRutaPage({super.key});
@@ -23,6 +24,8 @@ class MapSmsRutaPage extends StatefulWidget {
 class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   final MapController _mapController = MapController();
   late final SharedPreferences preferences;
+  Telephony telephony = Telephony.instance;
+  final service = FlutterBackgroundService();
 
   LatLng? _miUbicacion;
   LatLng? _ubicacionRecibida;
@@ -31,6 +34,8 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   String? _numeroVinculado;
   bool _autoEnvioActivado = false;
+  bool _solicitudUbi = false;
+  int _intervalo = 60;
 
   final String apiKeyORS =
       '5b3ce3597851110001cf6248627feed9a1c04d9f81e7b717bb1d3107';
@@ -38,8 +43,8 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   @override
   void initState() {
     super.initState();
-    _ubicacionInicialFuture = _obtenerUbicacionActual();
     _escucharSmsEntrantes();
+    _ubicacionInicialFuture = _obtenerUbicacionActual();
   }
 
   Future<void> _solicitarPermisos() async {
@@ -48,8 +53,10 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   Future<LatLng> _obtenerUbicacionActual() async {
     preferences = await SharedPreferences.getInstance();
-    _solicitarPermisos();
+    await _solicitarPermisos();
     _numeroVinculado = preferences.getString("numeroVinculado");
+    _intervalo= preferences.getInt("intervalo")?? 60;
+    await service.startService();
     bool gpsActivo = await Geolocator.isLocationServiceEnabled();
     if (!gpsActivo) {
       return const LatLng(-31.5406, -68.5767);
@@ -85,79 +92,62 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     return inicial;
   }
 
-  Future<bool?> _smsremover(int id, int threadId) async {
-    SmsRemover smsRemover = SmsRemover();
-    bool? success = await smsRemover.removeSmsById(id, threadId);
-    print('SMS removed: $success');
-    return success;
-  }
-
   void _escucharSmsEntrantes() {
-    SmsReceiver receiver = SmsReceiver();
-    receiver.onSmsReceived!.listen((SmsMessage message) async {
-      // Verificamos que haya un número vinculado
-      if (_numeroVinculado == null) return;
+    print("ESCUCHA");
+    telephony.listenIncomingSms(
+      onNewMessage: (SmsMessage message) async {
+        print("MENSAJE RECIBIDO: ${message.body}");
+        if (_numeroVinculado == null) return;
 
-      // Normalizamos ambos números para comparar (por si uno tiene +54 y otro no)
-      final remitente = message.address?.replaceAll(RegExp(r'\D'), '');
-      final vinculado = _numeroVinculado?.replaceAll(RegExp(r'\D'), '');
+        // Normalizamos ambos números para comparar (por si uno tiene +54 y otro no)
+        final remitente = message.address?.replaceAll(RegExp(r'\D'), '');
+        final vinculado = _numeroVinculado?.replaceAll(RegExp(r'\D'), '');
 
-      if (remitente == null || !remitente.endsWith(vinculado!)) return;
+        if (remitente == null ||
+            vinculado == null ||
+            !remitente.endsWith(vinculado)) {
+          return;
+        }
 
-      // Procesamos la ubicación si viene del número vinculado
-      print("MENSAJE RECIBIDO: ${message.body}");
-      final partes = message.body?.split(',');
-      if (partes != null) {
+        print("MENSAJE RECIBIDO: ${message.body}");
+        final partes = message.body?.split(',');
+
+        if (partes == null) return;
+
         double? lat;
         double? lng;
-        if (partes.length == 2) {
+
+        if (partes.length >= 2) {
           lat = double.tryParse(partes[0]);
           lng = double.tryParse(partes[1]);
-        } else if (partes.length == 3) {
-          lat = double.tryParse(partes[0]);
-          lng = double.tryParse(partes[1]);
-          //Si existe una tercera parte del mensaje y es la cadena "_S_U" se envia la ubicación
-          final solictud = partes[2];
-          if (solictud == "_S_U") await _enviarSms();
         }
+
+        // Si hay una tercera parte y es "_S_U", se interpreta como una solicitud de ubicación
+        if (partes.length == 3 && partes[2].trim() == "_S_U") {
+          await _enviarSms();
+        }
+
         if (lat != null && lng != null) {
           setState(() {
             _ubicacionRecibida = LatLng(lat!, lng!);
           });
         }
-      }
-      _smsremover(message.id!, message.threadId!);
-    });
+      },
+      onBackgroundMessage: background_service.mensajeBackground,
+      listenInBackground: true,
+    );
   }
 
   Future<void> _enviarSms() async {
     if (_miUbicacion == null || _numeroVinculado == null) return;
     final mensaje = "${_miUbicacion!.latitude},${_miUbicacion!.longitude}";
-    SmsSender sender = SmsSender();
-    SmsMessage sms = SmsMessage(_numeroVinculado, mensaje);
-    sms.onStateChanged.listen((state) {
-      if (state == SmsMessageState.Sent) {
-        print("SMS sent successfully!");
-      } else if (state == SmsMessageState.Delivered) {
-        print("SMS delivered!");
-      }
-    });
-    sender.sendSms(sms);
+    await telephony.sendSms(to: _numeroVinculado!, message: mensaje);
   }
 
   Future<void> _solicitarUbicacion() async {
     if (_miUbicacion == null || _numeroVinculado == null) return;
     final mensaje = "${_miUbicacion!.latitude},${_miUbicacion!.longitude},_S_U";
-    SmsSender sender = SmsSender();
-    SmsMessage sms = SmsMessage(_numeroVinculado, mensaje);
-    sms.onStateChanged.listen((state) {
-      if (state == SmsMessageState.Sent) {
-        print("SMS sent successfully!");
-      } else if (state == SmsMessageState.Delivered) {
-        print("SMS delivered!");
-      }
-    });
-    sender.sendSms(sms);
+    await telephony.sendSms(to: _numeroVinculado!, message: mensaje);
   }
 
   Future<void> _toggleAutoEnvio() async {
@@ -166,11 +156,11 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     });
 
     if (_autoEnvioActivado) {
-      final service = FlutterBackgroundService();
-      await service.startService();
+      
       service.invoke("setNumber", {"numero": _numeroVinculado});
+      service.invoke("automatic");
     } else {
-      FlutterBackgroundService().invoke("stopService");
+      service.invoke("stopautomatic");
     }
   }
 
@@ -192,22 +182,80 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
           ),
           actions: [
             TextButton(
-              onPressed:
-                  () => () async {
-                    setState(() {
-                      _numeroVinculado = numeroTemporal;
-                    });
-                    await preferences.setString(
-                      "numeroVinculado",
-                      numeroTemporal,
-                    );
-                    FlutterBackgroundService().invoke("setNumber", {
-                      "numero": _numeroVinculado,
-                    });
+              onPressed: () async {
+                setState(() {
+                  _numeroVinculado = numeroTemporal;
+                });
+                await preferences.setString("numeroVinculado", numeroTemporal);
+                service.invoke("setNumber", {"numero": _numeroVinculado});
 
-                    Navigator.pop(context);
-                  },
+                Navigator.pop(context);
+              },
               child: const Text("Vincular"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _solicitud() {
+    setState(() {
+      _solicitudUbi = !_solicitudUbi;
+    });
+    if (_solicitudUbi) {
+      service.invoke('listenSMS');
+    } else {
+      service.invoke('stoplisteningSMS');
+    }
+  }
+
+  void _seleccionarIntervaloEnvio() {
+    final opciones = [
+      {"label": "30 segundos", "segundos": 30},
+      {"label": "1 minuto", "segundos": 60},
+      {"label": "2 minutos", "segundos": 120},
+      {"label": "5 minutos", "segundos": 300},
+    ];
+
+    int seleccionTemporal = _intervalo;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Configurar intervalo de autoenvío"),
+          content: StatefulBuilder(
+            builder: (context, setStateDialog) {
+              return DropdownButton<int>(
+                isExpanded: true,
+                value: seleccionTemporal,
+                onChanged: (nuevoValor) {
+                  setStateDialog(() {
+                    seleccionTemporal = nuevoValor!;
+                  });
+                },
+                items:
+                    opciones.map((opcion) {
+                      return DropdownMenuItem<int>(
+                        value: opcion["segundos"] as int,
+                        child: Text(opcion["label"] as String),
+                      );
+                    }).toList(),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                setState(() {
+                  _intervalo = seleccionTemporal;
+                });
+                await preferences.setInt("intervalo", seleccionTemporal);
+                service.invoke("setInterval", {"intervalo": seleccionTemporal});
+                Navigator.pop(context);
+              },
+              child: const Text("Guardar"),
             ),
           ],
         );
@@ -265,15 +313,14 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   @override
   void dispose() {
+    service.invoke("stopService");
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Ubicación por SMS + Ruta"),
-      ),
+      appBar: AppBar(title: const Text("Ubicación por SMS + Ruta")),
       body: FutureBuilder<LatLng>(
         future: _ubicacionInicialFuture,
         builder: (context, snapshot) {
@@ -348,6 +395,17 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
             ),
             SpeedDialChild(
               child: Icon(
+                Icons.playlist_add_check_rounded,
+                color: _solicitudUbi ? Colors.red : Colors.green,
+              ),
+              label:
+                  _solicitudUbi
+                      ? 'Rechazar solicitud de ubicación'
+                      : 'Aceptar solicitudes de ubicación',
+              onTap: _solicitud,
+            ),
+            SpeedDialChild(
+              child: Icon(
                 _autoEnvioActivado ? Icons.pause : Icons.play_arrow,
                 color: _autoEnvioActivado ? Colors.red : Colors.green,
               ),
@@ -361,6 +419,11 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
               child: const Icon(Icons.alt_route),
               label: 'Calcular ruta',
               onTap: _calcularRuta,
+            ),
+            SpeedDialChild(
+              child: const Icon(Icons.timer),
+              label: 'Configurar intervalo autoenvío',
+              onTap: _seleccionarIntervaloEnvio,
             ),
           ],
         ],
