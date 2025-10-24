@@ -98,7 +98,7 @@ class _MapPageState extends State<MapPage> {
       if (data['routes'] != null &&
           data['routes'].isNotEmpty &&
           data['routes'][0]['geometry'] != null) {
-        //Tomamos la primera ruta 
+        //Tomamos la primera ruta
         final String encoded = data['routes'][0]['geometry'];
 
         final points = PolylinePoints().decodePolyline(encoded);
