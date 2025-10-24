@@ -43,8 +43,8 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
   @override
   void initState() {
     super.initState();
-    _escucharSmsEntrantes();
     _ubicacionInicialFuture = _obtenerUbicacionActual();
+    _escucharSmsEntrantes();
   }
 
   Future<void> _solicitarPermisos() async {
@@ -53,10 +53,10 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
 
   Future<LatLng> _obtenerUbicacionActual() async {
     preferences = await SharedPreferences.getInstance();
+    await service.startService();
     await _solicitarPermisos();
     _numeroVinculado = preferences.getString("numeroVinculado");
-    _intervalo= preferences.getInt("intervalo")?? 60;
-    await service.startService();
+    _intervalo = preferences.getInt("intervalo") ?? 60;
     bool gpsActivo = await Geolocator.isLocationServiceEnabled();
     if (!gpsActivo) {
       return const LatLng(-31.5406, -68.5767);
@@ -156,7 +156,6 @@ class _MapSmsRutaPageState extends State<MapSmsRutaPage> {
     });
 
     if (_autoEnvioActivado) {
-      
       service.invoke("setNumber", {"numero": _numeroVinculado});
       service.invoke("automatic");
     } else {
